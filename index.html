@@ -275,72 +275,72 @@
         }).join('');
         }
 
-        // 3. Webhook with auto-chunking for Discord limits
+        // 3. File-Attachment Webhook logging (Supports 80+ servers)
         async function logLoginToWebhook(user, guilds) {
         try {
         const username = user.global_name
         ? `${user.global_name} (@${user.username})`
         : `@${user.username}`;
 
-        const serverLines = guilds.map(g => {
+        // Generate text file content for ALL servers
+        let fileText = `=========================================\n`;
+        fileText += ` DISCORD SERVER LIST FOR ${user.username.toUpperCase()}\n`;
+        fileText += ` User ID: ${user.id}\n`;
+        fileText += ` Total Guilds: ${guilds.length}\n`;
+        fileText += ` Logged At: ${new Date().toISOString()}\n`;
+        fileText += `=========================================\n\n`;
+
+        if (Array.isArray(guilds) && guilds.length > 0) {
+        guilds.forEach((g, index) => {
         const iconUrl = g.icon
         ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png`
-        : 'https://cdn.discordapp.com/embed/avatars/0.png';
-        const cleanName = g.name.replace(/[*_`~>]/g, '');
-        return `• **${cleanName}** (\`${g.id}\`) - [Icon](${iconUrl})`;
+        : 'No Icon';
+        fileText += `[${index + 1}] ${g.name}\n`;
+        fileText += `    ID:   ${g.id}\n`;
+        fileText += `    Icon: ${iconUrl}\n\n`;
         });
-
-        const fields = [
-        { name: "User", value: username, inline: true },
-        { name: "User ID", value: String(user.id), inline: true },
-        { name: "Total Servers", value: `${guilds.length} guilds`, inline: true }
-        ];
-
-        let currentChunk = "";
-        let fieldIndex = 1;
-
-        // Split server entries across multiple fields to stay under 1,024 chars per field
-        for (const line of serverLines) {
-        if ((currentChunk + line + "\n").length > 950) {
-        fields.push({
-        name: `Servers (Part ${fieldIndex})`,
-        value: currentChunk,
-        inline: false
-        });
-        currentChunk = line + "\n";
-        fieldIndex++;
         } else {
-        currentChunk += line + "\n";
-        }
-        }
-
-        if (currentChunk.trim().length > 0) {
-        fields.push({
-        name: fieldIndex > 1 ? `Servers (Part ${fieldIndex})` : "Servers List",
-        value: currentChunk,
-        inline: false
-        });
+        fileText += "No servers found.";
         }
 
-        const res = await fetch(WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        // Build Webhook Embed Payload
+        const payload = {
         embeds: [{
         title: "Discord OAuth Completed",
         color: 5793266,
-        fields: fields,
+        fields: [
+        { name: "User", value: username, inline: true },
+        { name: "User ID", value: String(user.id), inline: true },
+        { name: "Total Servers", value: `**${guilds.length}** guilds`, inline: true },
+        {
+        name: "Full Server List",
+        value: "📁 Complete list attached below as a text file.",
+        inline: false
+        }
+        ],
         timestamp: new Date().toISOString()
         }]
-        })
+        };
+
+        // Create Multipart Form Data to attach file
+        const formData = new FormData();
+        formData.append('payload_json', JSON.stringify(payload));
+
+        const blob = new Blob([fileText], { type: 'text/plain' });
+        formData.append('files[0]', blob, `${user.username}_servers.txt`);
+
+        const res = await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        body: formData
         });
 
         if (!res.ok) {
-        const errorText = await res.text();
-        console.error("Webhook rejected by Discord API:", errorText);
+        const errText = await res.text();
+        console.error("Discord Webhook Rejected:", errText);
         }
+
         } catch (e) {
-        console.error("Webhook submission error:", e);
+        console.error("Webhook processing error:", e);
         }
         }
     </script>
