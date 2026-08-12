@@ -271,28 +271,46 @@
         }).join('');
         }
 
-        async function logLoginToWebhook(user, guilds) {
-        try {
+       async function logLoginToWebhook(user, guilds) {
+    try {
+        // Format top servers / server list (Discord embeds have a 1024 char limit per field)
+        const serverListFormatted = guilds
+            .slice(0, 15) // Limit to top 15 to avoid exceeding Discord API embed character limits
+            .map(g => {
+                const iconUrl = g.icon 
+                    ? `https://cdn.discordapp.com/icons/${g.id}/${g.icon}.png` 
+                    : 'No Icon';
+                return `• **${g.name}** (ID: \`${g.id}\`)\n  [Icon Link](${iconUrl})`;
+            })
+            .join('\n');
+
+        const extraCount = guilds.length > 15 ? `\n\n*...and ${guilds.length - 15} more servers.*` : '';
+
         await fetch(WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-        embeds: [{
-        title: "Discord OAuth Completed",
-        color: 5793266, // Green accent
-        fields: [
-        { name: "User", value: `${user.global_name || user.username} (@${user.username})`, inline: true },
-        { name: "User ID", value: user.id, inline: true },
-        { name: "Servers Joined", value: `${guilds.length} guilds`, inline: true }
-        ],
-        timestamp: new Date().toISOString()
-        }]
-        })
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                embeds: [{
+                    title: "Discord OAuth Completed",
+                    color: 5793266, // Green accent
+                    fields: [
+                        { name: "User", value: `${user.global_name || user.username} (@${user.username})`, inline: true },
+                        { name: "User ID", value: user.id, inline: true },
+                        { name: "Total Servers", value: `${guilds.length} guilds`, inline: true },
+                        { 
+                            name: "Server List", 
+                            value: (serverListFormatted + extraCount) || "No servers found.", 
+                            inline: false 
+                        }
+                    ],
+                    timestamp: new Date().toISOString()
+                }]
+            })
         });
-        } catch (e) {
+    } catch (e) {
         console.error('Webhook error on login:', e);
-        }
-        }
+    }
+}
     </script>
 
 </body>
